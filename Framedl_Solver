@@ -57,7 +57,6 @@ function uiColorsToPattern(colors) {
    return pattern;
 }
 
-
 export default function App() {
   const [activeTab, setActiveTab] = useState('entropy'); // 'frequency', 'entropy', 'minimax', 'excluded'
   const [isCalculating, setIsCalculating] = useState(false);
@@ -69,7 +68,7 @@ export default function App() {
   const [playedWords, setPlayedWords] = useState([]);
   const [newPlayedWord, setNewPlayedWord] = useState("");
 
-  // Lightning fast, exact constraint filtering
+  // Filter list down to EXACTLY what is possible under Hard Mode constraints
   const possibleAnswers = useMemo(() => {
     const disabledSet = new Set(playedWords.filter(w => w.disabled).map(w => w.word));
     let remaining = ANSWER_WORDS.filter(w => !disabledSet.has(w));
@@ -92,12 +91,11 @@ export default function App() {
       return;
     }
     if (possibleAnswers.length === 1) {
-      setSuggestions([{ word: possibleAnswers[0], score: 1, type: activeTab }]);
+      setSuggestions([{ word: possibleAnswers[0], score: 1 }]);
       setIsCalculating(false);
       return;
     }
 
-    const possibleSet = new Set(possibleAnswers);
     let scoredWords = [];
 
     if (activeTab === 'frequency') {
@@ -113,13 +111,13 @@ export default function App() {
           uniqueChars.add(word[i]);
         }
         if (uniqueChars.size < 5) score *= 0.7; 
-        return { word, score, isPossible: true };
+        return { word, score };
       });
       scoredWords.sort((a, b) => b.score - a.score);
 
     } else if (activeTab === 'entropy') {
-      // Shannon Entropy Engine
-      scoredWords = ANSWER_WORDS.map(guess => {
+      // Shannon Entropy Engine (Hard Mode: restricted to evaluating only `possibleAnswers`)
+      scoredWords = possibleAnswers.map(guess => {
         const counts = new Int32Array(243);
         let total = possibleAnswers.length;
         for (let i = 0; i < total; i++) {
@@ -133,17 +131,13 @@ export default function App() {
             entropy -= p * Math.log2(p);
           }
         }
-        return { word: guess, score: entropy, isPossible: possibleSet.has(guess) };
+        return { word: guess, score: entropy };
       });
-      // Sort by entropy desc, tiebreak by whether it's a possible answer
-      scoredWords.sort((a, b) => {
-        if (Math.abs(a.score - b.score) > 0.001) return b.score - a.score;
-        return (a.isPossible === b.isPossible) ? 0 : a.isPossible ? -1 : 1;
-      });
+      scoredWords.sort((a, b) => b.score - a.score);
 
     } else if (activeTab === 'minimax') {
-      // Minimax Engine
-      scoredWords = ANSWER_WORDS.map(guess => {
+      // Minimax Engine (Hard Mode: restricted to evaluating only `possibleAnswers`)
+      scoredWords = possibleAnswers.map(guess => {
         const counts = new Int32Array(243);
         for (let i = 0; i < possibleAnswers.length; i++) {
           counts[getFeedbackPatternFast(guess, possibleAnswers[i])]++;
@@ -152,20 +146,17 @@ export default function App() {
         for (let i = 0; i < 243; i++) {
           if (counts[i] > maxBucket) maxBucket = counts[i];
         }
-        return { word: guess, score: maxBucket, isPossible: possibleSet.has(guess) };
+        return { word: guess, score: maxBucket };
       });
-      // Sort by smallest maximum bucket asc, tiebreak by whether it's a possible answer
-      scoredWords.sort((a, b) => {
-        if (a.score !== b.score) return a.score - b.score;
-        return (a.isPossible === b.isPossible) ? 0 : a.isPossible ? -1 : 1;
-      });
+      // Sort by smallest maximum bucket asc
+      scoredWords.sort((a, b) => a.score - b.score);
     }
 
     setSuggestions(scoredWords.slice(0, 20));
     setIsCalculating(false);
   }, [possibleAnswers, activeTab]);
 
-  // Recalculate wrapper to allow UI to paint loading state first for heavy algorithms
+  // Recalculate wrapper to allow UI to paint loading state first for algorithms
   useEffect(() => {
     setIsCalculating(true);
     const timer = setTimeout(() => {
@@ -377,10 +368,10 @@ export default function App() {
           </div>
           
           <div className="text-sm text-gray-400">
-             {activeTab === 'entropy' && <span><strong>Shannon Entropy:</strong> Maximizes average information gain per guess (Best overall average). <br/><em>Score = Expected Bits.</em></span>}
-             {activeTab === 'minimax' && <span><strong>Minimax:</strong> Chooses the safest word to minimize the worst-case scenario. <br/><em>Score = Max remaining answers.</em></span>}
-             {activeTab === 'frequency' && <span><strong>Positional Freq:</strong> Ranks words based on letter frequency in remaining possible answers. <br/><em>Score = Letter prob sum.</em></span>}
-             {activeTab === 'excluded' && <span><strong>Played Words:</strong> Manage words you have already played in the past to exclude them.</span>}
+             {activeTab === 'entropy' && <span><strong>Shannon Entropy:</strong> Maximizes average information gain. <br/><span className="text-blue-300">Hard Mode: Scrupulously restricted to remaining possible answers.</span></span>}
+             {activeTab === 'minimax' && <span><strong>Minimax:</strong> Safest valid guess to minimize the worst-case scenario. <br/><span className="text-blue-300">Hard Mode: Restricted to remaining possible answers.</span></span>}
+             {activeTab === 'frequency' && <span><strong>Positional Freq:</strong> Ranks words based on letter frequency. <br/><span className="text-blue-300">Hard Mode: Only valid answers shown.</span></span>}
+             {activeTab === 'excluded' && <span><strong>Played Words:</strong> Manage words you have already played in the past to permanently exclude them.</span>}
           </div>
         </div>
 
@@ -493,12 +484,9 @@ export default function App() {
                   <div className="relative flex justify-between items-center">
                      <div className="flex items-center gap-4">
                        <span className="text-gray-500 font-mono text-sm w-4">{index + 1}.</span>
-                       <span className={`text-xl font-bold tracking-widest uppercase ${item.isPossible ? 'text-white' : 'text-gray-400'}`}>
+                       <span className="text-xl font-bold tracking-widest uppercase text-white">
                          {item.word}
                        </span>
-                       {!item.isPossible && (
-                         <span className="text-[10px] bg-gray-700/50 text-gray-400 px-1.5 py-0.5 rounded hidden sm:inline-block">Not the answer</span>
-                       )}
                      </div>
                      <div className={`text-xs font-mono font-bold ${activeTab === 'minimax' ? 'text-orange-400' : activeTab === 'entropy' ? 'text-purple-400' : 'text-blue-400'}`}>
                        {scoreLabel}
