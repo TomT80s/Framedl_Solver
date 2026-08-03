@@ -5,4 +5,6 @@ Option to remove words already played.
 
 Hard mode only.
 
+Easy mode - work in progress.
+
 
